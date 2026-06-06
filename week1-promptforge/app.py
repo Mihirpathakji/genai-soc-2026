@@ -66,9 +66,13 @@ PERSONAS = {
     },
     "Code Reviewer": {
         "system_prompt": (
-            "You are an expert Code Reviewer. You must analyze the code snippet provided and return a structured feedback strictly in JSON format. "
-            "The JSON must have the following keys: 'issues' (a list of strings representing identified issues), 'suggestions' (a list of strings representing actionable suggestions), "
-            "and 'severity' (a single string containing 'Low', 'Medium', or 'High'). Do not include any explanation or markdown formatting outside the JSON."
+            "You are an expert Code Reviewer. Analyze the code snippet provided and return feedback ONLY as a valid JSON object. "
+            "The JSON must have exactly these keys: "
+            "'issues' (a list of strings describing identified bugs or problems), "
+            "'suggestions' (a list of strings with actionable improvements), "
+            "and 'severity' (a single string: 'Low', 'Medium', or 'High'). "
+            "Do NOT include any explanation, preamble, or markdown formatting. "
+            "Do NOT wrap your response in code blocks. Respond with raw JSON only."
         ),
         "few_shot_examples": [
             {
@@ -110,41 +114,55 @@ PERSONAS = {
     }
 }
 
+def extract_text(content):
+    """Robustly extract a plain string from any Gradio message content format."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, dict):
+        # Gradio 6 multimodal format: {"text": "...", "files": [...]}
+        return str(content.get("text") or content.get("content") or "")
+    if isinstance(content, (list, tuple)):
+        # Sometimes content is a list of parts
+        parts = []
+        for part in content:
+            if isinstance(part, str):
+                parts.append(part)
+            elif isinstance(part, dict):
+                parts.append(str(part.get("text") or part.get("content") or ""))
+        return " ".join(parts)
+    if hasattr(content, "text"):
+        return str(content.text)
+    # Last resort: cast to string
+    return str(content)
+
 def inject_few_shot(persona, user_query, history):
     """Prepends few-shot examples before actual user query in history."""
     messages = [{"role": "system", "content": persona["system_prompt"]}]
     
-    # Prepend few-shot examples
+    # Prepend few-shot examples (already plain strings in PERSONAS dict)
     for example in persona["few_shot_examples"]:
-        messages.append({"role": "user", "content": example["user"]})
+        messages.append({"role": "user",      "content": example["user"]})
         messages.append({"role": "assistant", "content": example["assistant"]})
         
-    # Append conversation history
+    # Append conversation history — force all content to plain strings
     for msg in history:
         if isinstance(msg, dict):
-            role = msg.get("role")
-            content = msg.get("content")
+            role    = msg.get("role")
+            content = extract_text(msg.get("content"))
         elif hasattr(msg, "role") and hasattr(msg, "content"):
-            role = msg.role
-            content = msg.content
+            role    = msg.role
+            content = extract_text(msg.content)
         else:
             continue
             
-        if role and content:
-            # Extract string if content is a dictionary or object
-            if isinstance(content, dict):
-                content = content.get("text", "")
-            elif not isinstance(content, str) and hasattr(content, "text"):
-                content = content.text
-                
-            messages.append({"role": role, "content": str(content)})
+        if role and content and content.strip():
+            messages.append({"role": role, "content": content})
             
-    # Append actual user query
-    final_query = user_query
-    if persona["output_format"] == "json":
-        final_query += "\n\nRemember: You must respond ONLY with a valid JSON object containing keys 'issues' (list of strings), 'suggestions' (list of strings), and 'severity' ('Low', 'Medium', or 'High'). Do not wrap your response in markdown code blocks."
-        
-    messages.append({"role": "user", "content": final_query})
+    # Append current user query — force to plain string
+    clean_query = extract_text(user_query)
+    messages.append({"role": "user", "content": clean_query})
     return messages
 
 def bot_response(history, mode, temperature):
@@ -155,26 +173,21 @@ def bot_response(history, mode, temperature):
         
     persona = PERSONAS.get(mode, PERSONAS["Technical Explainer"])
     
-    # We take all historical messages except the last one (which is the current user prompt)
-    past_history = history[:-1]
-    last_msg_obj = history[-1]
+    # Split history: everything except the last user message
+    past_history  = history[:-1]
+    last_msg_obj  = history[-1]
     
-    # Extract raw user message
+    # Extract current user query as a plain string
     if isinstance(last_msg_obj, dict):
-        user_query = last_msg_obj.get("content", "")
+        user_query = extract_text(last_msg_obj.get("content", ""))
     elif hasattr(last_msg_obj, "content"):
-        user_query = last_msg_obj.content
+        user_query = extract_text(last_msg_obj.content)
     else:
-        user_query = str(last_msg_obj)
+        user_query = extract_text(last_msg_obj)
         
-    # Extract string if user_query is a dictionary or object
-    if isinstance(user_query, dict):
-        user_query = user_query.get("text", "")
-    elif not isinstance(user_query, str) and hasattr(user_query, "text"):
-        user_query = user_query.text
-        
-    # Inject few-shot examples
+    # Build messages with few-shot injection
     messages = inject_few_shot(persona, user_query, past_history)
+
     
     # Call Groq API with streaming
     response_format = None
