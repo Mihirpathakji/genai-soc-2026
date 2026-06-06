@@ -305,4 +305,10 @@ with gr.Blocks() as demo:
     )
 
 if __name__ == "__main__":
-    demo.launch(inbrowser=True)
+    # Define a premium theme using Gradio's Python theme engine
+    theme = gr.themes.Soft(
+        primary_hue="purple",
+        secondary_hue="indigo",
+        neutral_hue="slate"
+    )
+    demo.launch(inbrowser=True, theme=theme)
