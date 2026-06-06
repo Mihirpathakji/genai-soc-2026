@@ -216,3 +216,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+.env
+
+
+#.gitignore file ignores all the files written in it so that we we pushed all the files these files which were written in gitignore will got ignored and wont be pushed into github. As well as it will not track any specific changes made to this particular files.
