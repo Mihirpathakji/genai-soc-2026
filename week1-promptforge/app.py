@@ -129,8 +129,15 @@ def inject_few_shot(persona, user_query, history):
             content = msg.content
         else:
             continue
+            
         if role and content:
-            messages.append({"role": role, "content": content})
+            # Extract string if content is a dictionary or object
+            if isinstance(content, dict):
+                content = content.get("text", "")
+            elif not isinstance(content, str) and hasattr(content, "text"):
+                content = content.text
+                
+            messages.append({"role": role, "content": str(content)})
             
     # Append actual user query
     final_query = user_query
@@ -159,6 +166,12 @@ def bot_response(history, mode, temperature):
         user_query = last_msg_obj.content
     else:
         user_query = str(last_msg_obj)
+        
+    # Extract string if user_query is a dictionary or object
+    if isinstance(user_query, dict):
+        user_query = user_query.get("text", "")
+    elif not isinstance(user_query, str) and hasattr(user_query, "text"):
+        user_query = user_query.text
         
     # Inject few-shot examples
     messages = inject_few_shot(persona, user_query, past_history)
@@ -278,9 +291,17 @@ with gr.Blocks() as demo:
     
     # Message submitting events
     def user_submit(message, history):
-        if not message.strip():
+        # Extract string message if it's a dict or object
+        text_message = message
+        if isinstance(message, dict):
+            text_message = message.get("text", "")
+        elif not isinstance(message, str) and hasattr(message, "text"):
+            text_message = message.text
+            
+        if not text_message or not str(text_message).strip():
             return "", history
-        return "", history + [{"role": "user", "content": message}]
+            
+        return "", history + [{"role": "user", "content": text_message}]
         
     msg_input.submit(
         fn=user_submit,
